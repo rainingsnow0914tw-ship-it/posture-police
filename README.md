@@ -61,6 +61,8 @@ chmod +x deploy.sh
 4. Talk back to the AI when the banter window opens
 5. Sit up straight to earn your 30-second grace period
 
+> 🌐 **Bilingual:** The agent speaks English by default. Talk back in Traditional Chinese and it switches automatically.
+
 ## 🛠️ Tech Stack
 | Layer | Technology |
 |-------|-----------|
@@ -70,6 +72,7 @@ chmod +x deploy.sh
 | Backend | Node.js + Express + WebSocket |
 | Cloud | Google Cloud Run (us-central1) |
 | AI | Vertex AI — Gemini Live API |
+| Language | English (default) + Traditional Chinese (auto-detect) |
 | Auth | Workload Identity Federation |
 
 ## 📄 License
