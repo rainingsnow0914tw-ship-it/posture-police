@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head><script>window.lastShoulderY=0; window.currentRatio=0;</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Posture Police | 毒舌姿勢刑警</title>
+    <!-- Tailwind CSS for minimalist UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- TensorFlow.js & MediaPipe Pose -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+    <style>
+        .widget-mode {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            z-index: 50;
+        }
+        .pulse-red { animation: pulse-red 1.5s infinite; }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex items-center justify-center font-sans">
+
+    <!-- ===== Live Status Badges (新增：玻璃感狀態徽章) ===== -->
+    <div id="status-badges" class="fixed top-4 right-4 flex flex-col md:flex-row gap-2 z-50 text-xs font-bold transition-opacity">
+        <div id="badge-posture" class="px-3 py-1 rounded-full bg-green-500/80 backdrop-blur text-white shadow">
+            🟢 Upright
+        </div>
+        <div id="badge-banter" class="px-3 py-1 rounded-full bg-slate-500/80 backdrop-blur text-white shadow">
+            ⚪ Idle
+        </div>
+        <div id="badge-audio" class="px-3 py-1 rounded-full bg-green-500/80 backdrop-blur text-white shadow">
+            🎤 Mic
+        </div>
+        <div id="badge-vision" class="px-3 py-1 rounded-full bg-red-500/80 backdrop-blur text-white shadow">
+            ❌ Lost
+        </div>
+    </div>
+
+    <div id="main-dashboard" class="max-w-3xl w-full p-8 bg-slate-800 rounded-2xl shadow-2xl flex flex-col items-center">
+        <h1 class="text-3xl font-bold mb-2 text-emerald-400">🐢 Posture Police</h1>
+        <p class="text-slate-400 mb-6">Your invisible, sassy desk companion.</p>
+
+        <!-- Camera Container -->
+        <div class="relative rounded-xl overflow-hidden bg-black mb-6 w-[640px] h-[480px] shadow-inner">
+            <video id="video" playsinline class="absolute top-0 left-0 w-full h-full object-cover transform scale-x-[-1]"></video>
+            <canvas id="canvas" class="absolute top-0 left-0 w-full h-full transform scale-x-[-1] z-10"></canvas>
+            
+            <div id="loading-overlay" class="absolute inset-0 bg-slate-900/80 flex flex-col items-center justify-center z-20">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-400 mb-4"></div>
+                <span class="text-emerald-400" id="loading-text">Loading AI Models...</span>
+            </div>
+        </div>
+
+        <!-- Camera Selector -->
+        <div class="flex gap-4 w-full justify-center flex-wrap mb-4" id="step1-container">
+            <button id="get-cameras-btn" class="px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-full font-bold transition-colors">
+                🔍 1. 允許權限並載入鏡頭列表<br><small style="font-size:10px;opacity:0.7">Allow & Load Cameras</small>
+            </button>
+            <select id="camera-select" class="px-4 py-2 bg-slate-700 text-emerald-400 rounded-lg font-bold border border-emerald-500 focus:outline-none min-w-[300px] hidden">
+                <option value="">請先允許權限...</option>
+            </select>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex gap-4 w-full justify-center flex-wrap" id="step2-container">
+            <button id="start-btn" class="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 rounded-full font-bold transition-colors hidden">
+                🚀 2. 啟動毒舌刑警<br><small style="font-size:10px;opacity:0.7">Start Posture Police</small>
+            </button>
+            <button id="calibrate-btn" class="px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-full font-bold transition-colors hidden">
+                📍 校正標準坐姿<br><small style="font-size:10px;opacity:0.7">Calibrate</small>
+            </button>
+            <button id="mute-btn" class="px-6 py-3 bg-purple-500 hover:bg-purple-600 rounded-full font-bold transition-colors hidden text-white">
+                🔊 語音開啟中<br><small style="font-size:10px;opacity:0.7">Voice: ON</small>
+            </button>
+            <button id="auto-banter-toggle-btn" class="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 rounded-full font-bold transition-colors hidden text-white">
+                🔄 自動回嘴: ON<br><small style="font-size:10px;opacity:0.7">Auto-Banter: ON</small>
+            </button>
+            <button id="pause-btn" class="px-6 py-3 bg-yellow-500 hover:bg-yellow-600 rounded-full font-bold transition-colors hidden text-slate-900">
+                ⏸️ 暫停監控<br><small style="font-size:10px;opacity:0.7">Pause</small>
+            </button>
+            <button id="banter-btn" class="px-6 py-3 bg-red-500 hover:bg-red-600 rounded-full font-bold transition-colors hidden">
+                🎤 點我回嘴！
+            </button>
+            <button id="minimize-btn" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-full font-bold transition-colors hidden">
+                進入隱形模式<br><small style="font-size:10px;opacity:0.7">Stealth Mode</small>
+            </button>
+        </div>
+
+        <!-- Status & Logs -->
+        <div class="mt-6 w-full bg-slate-900 p-4 rounded-lg font-mono text-sm text-emerald-300 h-32 overflow-y-auto" id="log-box">
+            > System initialized. For best experience, use Chrome. Waiting for camera...
+        </div>
+    </div>
+
+    <!-- Custom Prompt Modal -->
+    <div id="custom-prompt-modal" class="fixed inset-0 bg-slate-900/90 hidden flex items-center justify-center z-[100] backdrop-blur-sm">
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-lg w-full text-center border border-emerald-500/30">
+            <h2 class="text-2xl font-bold text-emerald-400 mb-4">🎤 語音被擋住了！</h2>
+            <p class="text-slate-300 mb-6" id="prompt-reason">請直接打字回嘴抱怨：</p>
+            <input type="text" id="custom-prompt-input" class="w-full px-4 py-3 rounded-lg bg-slate-900 text-white border border-slate-600 focus:border-emerald-500 focus:outline-none mb-6" placeholder="輸入妳的抱怨... (按 Enter 送出)">
+            <div class="flex gap-4 justify-center">
+                <button id="prompt-cancel-btn" class="px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold transition-colors">放棄回嘴</button>
+                <button id="prompt-submit-btn" class="px-6 py-2 bg-emerald-500 hover:bg-emerald-600 rounded-lg font-bold transition-colors">送出開嗆</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Minimalist Floating Widget -->
+    <div id="floating-widget" class="widget-mode bg-emerald-500 hidden" onclick="restoreDashboard()">
+        <span class="text-3xl" id="widget-icon">🛡️</span>
+    </div>
+
+    <script>
+
+        // ✅ 全域狀態變數
+        let baselineRatio = null;
+        let consecutiveSlouchFrames = 0;
+        let activeRecognition = null;
+        const SLOUCH_THRESHOLD_FRAMES = 10;
+        const ROAST_COOLDOWN_MS = 8000;
+        const mainDashboard = document.getElementById("main-dashboard");
+        const floatingWidget = document.getElementById("floating-widget");
+        let lastShoulderY = null;
+        let currentRatio = 0;
+        let postureState = "upright";
+        let banterState = "idle";
+        let audioState = "mic";
+        let visionState = "lost";
+        let isRunning = false;
+        let isRoasting = false;
+        let isMuted = false;
+        let autoBanterEnabled = true;
+        const TURN = { IDLE: "idle", LISTENING: "listening", RESPONDING: "responding" };
+        let turnState = TURN.IDLE;
+        let banterWindowOpen = false;
+        let banterUtteranceTaken = false;
+        let banterTimer = null;
+        let banterSessionId = 0;
+        let banterClosedForSession = new Set();
+        let lastRoastTime = 0;
+        let postureCooldownUntil = 0;
+        const AUTO_BANTER_LISTEN_MS = 10000;
+        const POST_RESPONSE_COOLDOWN_MS = 3000;
+        const SLOUCH_FRAMES_THRESHOLD = 45;
+        const UPRIGHT_FRAMES_THRESHOLD = 30;
+        let slouchFrameCount = 0;
+        let uprightFrameCount = 0;
+        let baselineEarShoulderDist = null;
+        const logBox = document.getElementById("log-box");
+        function log(msg) {
+            if (logBox) {
+                logBox.innerHTML += "<br>> " + msg;
+                logBox.scrollTop = logBox.scrollHeight;
+            }
+            console.log(msg);
+        }
+
+        // ====================================================================
+        // 🔗 DOM 元素綁定
+        // ====================================================================
+        const startBtn = document.getElementById('start-btn');
+        const getCamerasBtn = document.getElementById('get-cameras-btn');
+        const cameraSelect = document.getElementById('camera-select');
+        const muteBtn = document.getElementById('mute-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const banterBtn = document.getElementById('banter-btn');
+        const calibrateBtn = document.getElementById('calibrate-btn');
+        const autoBanterToggleBtn = document.getElementById('auto-banter-toggle-btn');
+        const minimizeBtn = document.getElementById('minimize-btn');
+        const widgetIcon = document.getElementById('widget-icon');
+        const customPromptModal = document.getElementById('custom-prompt-modal');
+
+
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const videoEl = document.getElementById('video');
+        const canvasEl = document.getElementById('canvas');
+        const canvas = canvasEl; const ctx = canvasEl ? canvasEl.getContext('2d') : null;
+
+        // ====================================================================
+        // 🎙️ Gemini Live API 語音層 (v2)
+        // 架構：前端 WebSocket ↔ Cloud Run 後端 ↔ Gemini Live API
+        // ====================================================================
+
+        // ⚠️ 部署完 Cloud Run 後，把這裡換成你的 wss:// 網址
+        // 格式：wss://posture-police-v2-xxxxxxxx-uc.a.run.app
+        const BACKEND_WS_URL = "wss://posture-police-v2-1069534499581.us-central1.run.app";
+
+        // --- 全域 Live API 狀態 ---
+        let liveWs = null;          // WebSocket 連線
+        let isLiveReady = false;    // Gemini setup 完成了嗎
+        let audioContext = null;    // Web Audio API context
+        let mediaStream = null;     // 麥克風 stream
+        let audioProcessor = null;  // ScriptProcessorNode，捕捉麥克風
+        let isListening = false;    // 現在有在聽麥克風嗎
+        let audioPlayQueue = [];    // 待播放的音訊 chunk 佇列
+        let isPlaying = false;      // 現在有在播放音訊嗎
+
+        // --- 離線句庫（後端斷線時的 fallback）---
+        const offlineRoasts = [
+            "沒連上雲端我也看得出妳在駝背！給我挺胸！",
+            "API 罷工了，但妳的脊椎不能罷工！坐直！",
+            "網路跟妳的坐姿一樣糟，快點挺起來！"
+        ];
+
+        function offlineSmartReply(userReply) {
+            const t = (userReply || "").toLowerCase();
+            if (t.includes("嚴格") || t.includes("兇")) return "我兇是為了妳的脖子，挺直。";
+            if (t.includes("累") || t.includes("休息")) return "可以休息，但別用駝背休息。坐直再躺平。";
+            if (t.includes("坐直") || t.includes("好了")) return "行，這次算妳過關。保持 30 秒。";
+            return "嘴可以硬，背不行。坐直。";
+        }
+
+        // ================================================================
+        // 連線到後端 WebSocket
+        // ================================================================
+        function connectToLiveBackend() {
+            if (liveWs && liveWs.readyState === WebSocket.OPEN) return;
+
+            log("🔌 正在連線到 Gemini Live 後端...");
+
+            try {
+                liveWs = new WebSocket(BACKEND_WS_URL);
+            } catch(e) {
+                log("❌ WebSocket 連線失敗：" + e.message);
+                return;
+            }
+
+            liveWs.onopen = () => {
+                log("✅ 後端已連線，等待 Gemini 就緒...");
+            };
+
+            liveWs.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+
+                    // Gemini setup 完成
+                    if (msg.type === 'ready') {
+                        isLiveReady = true;
+                        log("🎙️ Gemini Live API 就緒！開始監控姿勢。");
+                        banterState = "idle";
+                        updateBadges();
+                        return;
+                    }
+
+                    // 錯誤訊息
+                    if (msg.type === 'error') {
+                        log("❌ 後端錯誤：" + msg.message);
+                        isLiveReady = false;
+                        return;
+                    }
+
+                    // Gemini 關閉
+                    if (msg.type === 'gemini_closed') {
+                        log("⚠️ Gemini 連線已關閉，嘗試重連...");
+                        isLiveReady = false;
+                        setTimeout(connectToLiveBackend, 2000);
+                        return;
+                    }
+
+                    // Gemini 回傳的音訊串流
+                    if (msg.serverContent) {
+                        handleGeminiResponse(msg.serverContent);
+                        return;
+                    }
+
+                } catch(e) {
+                    // 非 JSON，忽略
+                }
+            };
+
+            liveWs.onerror = (err) => {
+                log("❌ WebSocket 錯誤，切換離線模式");
+                isLiveReady = false;
+            };
+
+            liveWs.onclose = () => {
+                log("🔌 後端連線已斷開");
+                isLiveReady = false;
+                setTimeout(connectToLiveBackend, 3000);
+            };
+        }
+
+        // ================================================================
+        // 處理 Gemini 回傳的音訊（播放毒舌語音）
+        // ================================================================
+        function handleGeminiResponse(serverContent) {
+            // 取得音訊 parts
+            const parts = serverContent?.modelTurn?.parts || [];
+
+            for (const part of parts) {
+                if (part.inlineData?.mimeType === 'audio/pcm') {
+                    // 把 base64 PCM 音訊加入播放佇列
+                    audioPlayQueue.push(part.inlineData.data);
+                }
+                if (part.text) {
+                    log(`AI 毒舌: "${part.text}"`);
+                }
+            }
+
+            // turn 結束了，開始播放
+            if (serverContent.turnComplete) {
+                isRoasting = false;
+                widgetIcon.textContent = '🛡️';
+                postureCooldownUntil = Date.now() + POST_RESPONSE_COOLDOWN_MS;
+                banterState = "idle";
+                updateBadges();
+
+                if (audioPlayQueue.length > 0) {
+                    playAudioQueue();
+                }
+            }
+        }
+
+        // ================================================================
+        // 播放從 Gemini 收到的 PCM 音訊佇列
+        // ================================================================
+        async function playAudioQueue() {
+            if (isPlaying || audioPlayQueue.length === 0) return;
+            isPlaying = true;
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            }
+
+            // 把所有 base64 chunk 合併成一個 buffer
+            const chunks = audioPlayQueue.splice(0);
+            const totalLength = chunks.reduce((sum, b64) => {
+                return sum + atob(b64).length;
+            }, 0);
+
+            const pcmData = new Int16Array(totalLength / 2);
+            let offset = 0;
+            for (const b64 of chunks) {
+                const binary = atob(b64);
+                for (let i = 0; i < binary.length; i += 2) {
+                    const lo = binary.charCodeAt(i) & 0xFF;
+                    const hi = (i + 1 < binary.length) ? (binary.charCodeAt(i + 1) & 0xFF) : 0;
+                    pcmData[offset++] = (hi << 8) | lo;
+                }
+            }
+
+            // 轉成 Web Audio API 格式（Float32）
+            const floatData = new Float32Array(pcmData.length);
+            for (let i = 0; i < pcmData.length; i++) {
+                floatData[i] = pcmData[i] / 32768.0;
+            }
+
+            const audioBuffer = audioContext.createBuffer(1, floatData.length, 24000);
+            audioBuffer.getChannelData(0).set(floatData);
+
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+
+            source.onended = () => {
+                isPlaying = false;
+                // 如果後續還有 chunk 進來，繼續播
+                if (audioPlayQueue.length > 0) {
+                    playAudioQueue();
+                } else {
+                    // 播完後開啟回嘴視窗
+                    if (autoBanterEnabled) {
+                        openBanterWindow(AUTO_BANTER_LISTEN_MS);
+                    }
+                }
+            };
+
+            source.start();
+        }
+
+        // ================================================================
+        // 發送姿勢事件給 Gemini（駝背偵測 / 坐直了）
+        // ================================================================
+        function sendPostureEvent(eventType) {
+            // eventType: "SLOUCH_DETECTED" 或 "POSTURE_OK"
+            if (!isLiveReady || !liveWs || liveWs.readyState !== WebSocket.OPEN) {
+                // 離線 fallback
+                if (eventType === "SLOUCH_DETECTED") {
+                    const fallback = offlineRoasts[Math.floor(Math.random() * offlineRoasts.length)];
+                    log(`[離線] ${fallback}`);
+                    speakFallback(fallback);
+                }
+                return;
+            }
+
+            isRoasting = true;
+            banterState = "responding";
+            updateBadges();
+            widgetIcon.textContent = '🗣️';
+            lastRoastTime = Date.now();
+
+            log(eventType === "SLOUCH_DETECTED" ? "偵測到烏龜頸！通知 Gemini..." : "姿勢已矯正，通知 Gemini...");
+
+            liveWs.send(JSON.stringify({
+                type: 'posture_event',
+                event: eventType
+            }));
+        }
+
+        // ================================================================
+        // 開啟回嘴視窗：開始收麥克風音訊串流給 Gemini
+        // ================================================================
+        function openBanterWindow(ms = 10000) {
+            banterSessionId += 1;
+            const sid = banterSessionId;
+
+            banterWindowOpen = true;
+            banterUtteranceTaken = false;
+            turnState = TURN.LISTENING;
+            banterState = "listening";
+            updateBadges();
+
+            log(`🎤 回嘴回合開啟（${Math.round(ms / 1000)} 秒）...`);
+
+            // 開始把麥克風音訊串流給後端
+            startMicStreaming();
+
+            banterBtn.innerText = "🎤 正在聽妳頂嘴...";
+            banterBtn.classList.remove('hidden');
+
+            clearTimeout(banterTimer);
+            banterTimer = setTimeout(() => closeBanterWindow("timeout", sid), ms);
+        }
+
+        // ================================================================
+        // 關閉回嘴視窗
+        // ================================================================
+        function closeBanterWindow(reason = "done", sid = banterSessionId) {
+            if (banterClosedForSession.has(sid)) return;
+            banterClosedForSession.add(sid);
+
+            clearTimeout(banterTimer);
+            banterTimer = null;
+            banterWindowOpen = false;
+
+            if (turnState === TURN.LISTENING) {
+                turnState = TURN.IDLE;
+            }
+
+            banterState = "idle";
+            updateBadges();
+
+            // 告訴 Gemini 用戶說完了
+            if (isLiveReady && liveWs && liveWs.readyState === WebSocket.OPEN) {
+                liveWs.send(JSON.stringify({
+                    type: 'posture_event',
+                    event: '（用戶回嘴結束）'
+                }));
+            }
+
+            log(`🧩 回嘴回合結束（${reason}）`);
+            resetBanterBtn();
+        }
+
+        // ================================================================
+        // 開始麥克風串流（把音訊即時送給後端）
+        // ================================================================
+        async function startMicStreaming() {
+            if (isListening) return;
+
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                }
+
+                // 取得麥克風 stream（之前已拿過權限，這裡直接用）
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                // ScriptProcessorNode：每 4096 samples 捕捉一次音訊
+                audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                audioProcessor.onaudioprocess = (e) => {
+                    if (!isListening || !liveWs || liveWs.readyState !== WebSocket.OPEN) return;
+
+                    // 取得 Float32 音訊資料，轉成 PCM Int16，再 base64 編碼
+                    const float32 = e.inputBuffer.getChannelData(0);
+                    const int16 = new Int16Array(float32.length);
+                    for (let i = 0; i < float32.length; i++) {
+                        int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+                    }
+
+                    // 轉 base64
+                    const bytes = new Uint8Array(int16.buffer);
+                    let binary = '';
+                    bytes.forEach(b => binary += String.fromCharCode(b));
+                    const base64 = btoa(binary);
+
+                    // 送給後端
+                    liveWs.send(JSON.stringify({
+                        type: 'audio_chunk',
+                        data: base64
+                    }));
+                };
+
+                source.connect(audioProcessor);
+                audioProcessor.connect(audioContext.destination);
+
+                isListening = true;
+                audioState = "mic";
+                updateBadges();
+                log("🎤 麥克風串流已開始");
+
+            } catch(e) {
+                log("麥克風啟動失敗：" + e.message);
+                audioState = "blocked";
+                updateBadges();
+                fallbackToPrompt("麥克風無法啟動。");
+            }
+        }
+
+        // ================================================================
+        // 停止麥克風串流
+        // ================================================================
+        function stopMicStreaming() {
+            if (!isListening) return;
+            isListening = false;
+
+            if (audioProcessor) {
+                audioProcessor.disconnect();
+                audioProcessor = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(t => t.stop());
+                mediaStream = null;
+            }
+
+            log("🎤 麥克風串流已停止");
+        }
+
+        // ================================================================
+        // 離線 fallback：用瀏覽器 TTS 播放
+        // ================================================================
+        function speakFallback(text) {
+            if (!window.speechSynthesis) return;
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-TW';
+            utterance.rate = 1.1;
+            utterance.onend = () => {
+                isRoasting = false;
+                widgetIcon.textContent = '🛡️';
+                postureCooldownUntil = Date.now() + POST_RESPONSE_COOLDOWN_MS;
+                if (autoBanterEnabled) openBanterWindow(AUTO_BANTER_LISTEN_MS);
+            };
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // ================================================================
+        // Fallback to Prompt（打字回嘴備案）
+        // ================================================================
+        function fallbackToPrompt(reason) {
+            log(`${reason} 啟動打字回嘴備案！`);
+            resetBanterBtn();
+            audioState = "text";
+            updateBadges();
+
+            const input = document.getElementById('custom-prompt-input');
+            document.getElementById('prompt-reason').innerText = `${reason} 請直接打字回嘴抱怨：`;
+            customPromptModal.classList.remove('hidden');
+            customPromptModal.classList.add('flex');
+            input.value = '';
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeModal() {
+            customPromptModal.classList.add('hidden');
+            customPromptModal.classList.remove('flex');
+        }
+
+        document.getElementById('prompt-submit-btn').addEventListener('click', () => {
+            if (banterUtteranceTaken) {
+                closeModal();
+                return;
+            }
+            banterUtteranceTaken = true;
+            const text = document.getElementById('custom-prompt-input').value;
+            closeModal();
+            closeBanterWindow("typed_reply", banterSessionId);
+            turnState = TURN.RESPONDING;
+
+            if (text && text.trim().length > 0) {
+                // 用文字事件送給 Gemini
+                if (isLiveReady && liveWs && liveWs.readyState === WebSocket.OPEN) {
+                    liveWs.send(JSON.stringify({
+                        type: 'posture_event',
+                        event: `用戶頂嘴說：${text.trim()}`
+                    }));
+                } else {
+                    const fallback = offlineSmartReply(text);
+                    speakFallback(fallback);
+                }
+            } else {
+                log("放棄回嘴？看來妳承認自己駝背了。");
+                turnState = TURN.IDLE;
+            }
+        });
+
+        document.getElementById('prompt-cancel-btn').addEventListener('click', () => {
+            closeModal();
+            closeBanterWindow("prompt_cancelled", banterSessionId);
+            turnState = TURN.IDLE;
+        });
+
+        document.getElementById('custom-prompt-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') document.getElementById('prompt-submit-btn').click();
+        });
+
+        function resetBanterBtn() {
+            banterBtn.classList.add('hidden');
+            banterBtn.innerText = "🎤 點我回嘴！";
+            banterBtn.classList.replace('bg-red-700', 'bg-red-500');
+        }
+
+        // --- Setup Camera ---
+        // --- Setup Camera (Xi v2: 禁止 facingMode fallback，強制用選定的鏡頭) ---
+        async function setupCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error("Browser API navigator.mediaDevices.getUserMedia not available");
+            }
+
+            const selectedDeviceId = cameraSelect.value;
+
+            // ✅ 沒選就不偷偷 fallback，直接報錯讓用戶知道
+            if (!selectedDeviceId) {
+                throw new Error("請先選擇鏡頭（避免自動選到手機/虛擬鏡頭）");
+            }
+
+            const constraints = {
+                audio: false,
+                video: {
+                    deviceId: { exact: selectedDeviceId },
+                    width: 640,
+                    height: 480
+                }
+            };
+
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.width = video.videoWidth;
+                    video.height = video.videoHeight;
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    resolve(video);
+                };
+            });
+        }
+
+        // --- Pose Detection & Logic ---
+        async function init() {
+            loadingOverlay.style.display = 'flex';
+            document.getElementById('loading-text').innerText = "Requesting Camera Access...";
+            cameraSelect.disabled = true; 
+            
+            try {
+                await setupCamera();
+                video.play();
+                
+                document.getElementById('loading-text').innerText = "Loading MediaPipe Model...";
+                detector = await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose, {
+                    runtime: 'tfjs',
+                    modelType: 'lite'
+                });
+                
+                loadingOverlay.style.display = 'none';
+                log("鏡頭與模型載入成功！請坐直並按下「校正標準坐姿」。");
+                
+                visionState = "ok";
+                updateBadges();
+
+                startBtn.classList.add('hidden');
+                cameraSelect.classList.add('hidden'); 
+                calibrateBtn.classList.remove('hidden');
+                muteBtn.classList.remove('hidden'); 
+                autoBanterToggleBtn.classList.remove('hidden'); 
+                pauseBtn.classList.remove('hidden');
+                minimizeBtn.classList.remove('hidden');
+                
+                isRunning = true;
+                detectPose();
+
+                // 🔌 姿勢偵測啟動後，連線到 Gemini Live 後端
+                connectToLiveBackend();
+                // 🎤 立刻開始持續串流麥克風（保持 Gemini session 存活）
+                setTimeout(startMicStreaming, 2000);
+            } catch (error) {
+                log("初始化失敗: " + error.message);
+                loadingOverlay.style.display = 'none';
+            }
+        }
+
+let isPaused = false;
+        async function detectPose() {
+            if (!isRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!isPaused) {
+                const poses = await detector.estimatePoses(video);
+                if (poses.length > 0) {
+                    const keypoints = poses[0].keypoints;
+                    drawSkeleton(keypoints);
+                    analyzePosture(keypoints);
+                } else {
+                    if (visionState !== "lost") {
+                        visionState = "lost";
+                        updateBadges();
+                    }
+                }
+            } else {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#eab308'; 
+                ctx.font = "bold 30px sans-serif";
+                ctx.fillText("⏸️ 監控暫停中...", canvas.width/2 - 120, canvas.height/2);
+            }
+
+            requestAnimationFrame(detectPose);
+        }
+
+        function analyzePosture(keypoints) {
+            if (Date.now() < postureCooldownUntil) {
+                return;
+            }
+
+            const leftEar = keypoints.find(k => k.name === 'left_ear');
+            const rightEar = keypoints.find(k => k.name === 'right_ear');
+            const leftShoulder = keypoints.find(k => k.name === 'left_shoulder');
+            const rightShoulder = keypoints.find(k => k.name === 'right_shoulder');
+            const leftWrist = keypoints.find(k => k.name === 'left_wrist');
+            const rightWrist = keypoints.find(k => k.name === 'right_wrist');
+            
+            if (leftEar && rightEar && leftShoulder && rightShoulder && 
+                leftShoulder.score > 0.5 && rightShoulder.score > 0.5) {
+                
+                const earQualityOk = leftEar.score > 0.65 && rightEar.score > 0.65;
+                if (!earQualityOk) {
+                    if (visionState !== "occluded") {
+                        visionState = "occluded";
+                        updateBadges();
+                    }
+                    consecutiveSlouchFrames = Math.max(0, consecutiveSlouchFrames - 1);
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = "bold 20px monospace";
+                    ctx.fillText(`臉部點不穩：暫停判定`, 20, 70);
+                    return;
+                } else {
+                    if (visionState !== "ok") {
+                        visionState = "ok";
+                        updateBadges();
+                    }
+                }
+
+                const wristOk = leftWrist && rightWrist && leftWrist.score > 0.4 && rightWrist.score > 0.4;
+                const isHandsUp = wristOk && (leftWrist.y < leftShoulder.y - 10 || rightWrist.y < rightShoulder.y - 10);
+
+                if (isHandsUp) {
+                    if (postureState !== "stretch") {
+                        postureState = "stretch";
+                        updateBadges();
+                    }
+
+                    consecutiveSlouchFrames = 0;
+                    postureCooldownUntil = Date.now() + 1500; 
+                    ctx.fillStyle = '#60a5fa';
+                    ctx.font = "bold 20px monospace";
+                    ctx.fillText(`伸展模式：暫停判定`, 20, 70);
+                    return;
+                }
+
+                const avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+
+                if (lastShoulderY !== null) {
+                    const delta = Math.abs(avgShoulderY - lastShoulderY);
+                    if (delta > 25) { 
+                        postureCooldownUntil = Date.now() + 1000;
+                        consecutiveSlouchFrames = 0;
+                        lastShoulderY = avgShoulderY;
+                        ctx.fillStyle = '#a78bfa';
+                        ctx.font = "bold 20px monospace";
+                        ctx.fillText(`肩膀大動作：暫停判定`, 20, 70);
+                        return;
+                    }
+                }
+                lastShoulderY = avgShoulderY;
+
+                const faceWidth = Math.abs(leftEar.x - rightEar.x);
+                const avgEarY = (leftEar.y + rightEar.y) / 2;
+                const neckHeight = avgShoulderY - avgEarY;
+                
+                currentRatio = neckHeight / faceWidth;
+                
+                ctx.font = "bold 20px monospace";
+                if (!baselineRatio) {
+                    ctx.fillStyle = '#3b82f6'; 
+                    ctx.fillText(`當前比例: ${currentRatio.toFixed(2)} (請先校正)`, 20, 40);
+                    return; 
+                }
+
+                const slouchThreshold = baselineRatio * 0.85; 
+                
+                ctx.fillStyle = currentRatio < slouchThreshold ? '#ef4444' : '#10b981';
+                ctx.fillText(`標準: ${baselineRatio.toFixed(2)} | 當前: ${currentRatio.toFixed(2)}`, 20, 40);
+
+                if (currentRatio < slouchThreshold) { 
+                    if (postureState !== "slouch") {
+                        postureState = "slouch";
+                        updateBadges();
+                    }
+
+                    consecutiveSlouchFrames++;
+                    floatingWidget.classList.add('pulse-red', 'bg-red-500');
+                    floatingWidget.classList.remove('bg-emerald-500');
+                    
+                    const timeSinceLastRoast = Date.now() - lastRoastTime;
+                    
+                    if (consecutiveSlouchFrames > SLOUCH_THRESHOLD_FRAMES && timeSinceLastRoast > ROAST_COOLDOWN_MS) {
+                        
+                        if (banterWindowOpen || turnState !== TURN.IDLE) {
+                            consecutiveSlouchFrames = 0;
+                            return;
+                        }
+
+                        lastRoastTime = Date.now(); 
+                        
+                        if (!isMuted) {
+                            sendPostureEvent('SLOUCH_DETECTED');
+                        } else {
+                            log("⚠️ 偵測到駝背！(靜音模式)");
+                        }
+                        consecutiveSlouchFrames = 0;
+                    }
+                } else {
+                    if (postureState !== "upright") {
+                        postureState = "upright";
+                        updateBadges();
+                    }
+
+                    consecutiveSlouchFrames = Math.max(0, consecutiveSlouchFrames - 2);
+                    if(consecutiveSlouchFrames === 0 && !isRoasting && turnState === TURN.IDLE) {
+                        floatingWidget.classList.remove('pulse-red', 'bg-red-500');
+                        floatingWidget.classList.add('bg-emerald-500');
+                    }
+                }
+            } else {
+                if (visionState !== "lost") {
+                    visionState = "lost";
+                    updateBadges();
+                }
+            }
+        }
+
+        function drawSkeleton(keypoints) {
+            ctx.fillStyle = '#10b981'; 
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 2;
+
+            const criticalPoints = ['left_ear', 'right_ear', 'left_shoulder', 'right_shoulder'];
+            keypoints.forEach(point => {
+                if (point.score > 0.5 && criticalPoints.includes(point.name)) {
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+            });
+            
+            const lEar = keypoints.find(k => k.name === 'left_ear');
+            const rEar = keypoints.find(k => k.name === 'right_ear');
+            const lShoulder = keypoints.find(k => k.name === 'left_shoulder');
+            const rShoulder = keypoints.find(k => k.name === 'right_shoulder');
+            
+            if(lEar && rEar && lShoulder && rShoulder && lEar.score > 0.5 && rEar.score > 0.5 && lShoulder.score > 0.5 && rShoulder.score > 0.5) {
+                ctx.strokeStyle = '#ef4444';
+                ctx.beginPath(); ctx.moveTo(lEar.x, lEar.y); ctx.lineTo(rEar.x, rEar.y); ctx.stroke();
+
+                const avgEarX = (lEar.x + rEar.x) / 2;
+                const avgEarY = (lEar.y + rEar.y) / 2;
+                const avgShoulderX = (lShoulder.x + rShoulder.x) / 2;
+                const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
+                ctx.strokeStyle = '#10b981';
+                ctx.beginPath(); ctx.moveTo(avgEarX, avgEarY); ctx.lineTo(avgShoulderX, avgShoulderY); ctx.stroke();
+            }
+        }
+
+        // --- UI Interactions ---
+        function updateBadges() {
+            const postureBadge = document.getElementById("badge-posture");
+            const banterBadge = document.getElementById("badge-banter");
+            const audioBadge = document.getElementById("badge-audio");
+            const visionBadge = document.getElementById("badge-vision");
+
+            if (!postureBadge) return; // safeguard
+
+            // Posture
+            if (postureState === "upright") {
+                postureBadge.className = "px-3 py-1 rounded-full bg-green-500/80 backdrop-blur text-white shadow";
+                postureBadge.innerText = "🟢 Upright";
+            } else if (postureState === "slouch") {
+                postureBadge.className = "px-3 py-1 rounded-full bg-red-500/80 backdrop-blur text-white shadow";
+                postureBadge.innerText = "🔴 Slouching";
+            } else if (postureState === "stretch") {
+                postureBadge.className = "px-3 py-1 rounded-full bg-blue-500/80 backdrop-blur text-white shadow";
+                postureBadge.innerText = "🔵 Stretch Mode";
+            }
+
+            // Banter
+            const banterMap = {
+                idle: ["⚪ Idle", "bg-slate-500/80 text-white"],
+                listening: ["🟡 Listening", "bg-yellow-500/80 text-slate-900"],
+                responding: ["🟣 Responding", "bg-purple-500/80 text-white"],
+                cooldown: ["🔵 Cooldown", "bg-sky-500/80 text-white"]
+            };
+            if(banterMap[banterState]){
+                banterBadge.className = `px-3 py-1 rounded-full ${banterMap[banterState][1]} backdrop-blur shadow`;
+                banterBadge.innerText = banterMap[banterState][0];
+            }
+
+            // Audio
+            const audioMap = {
+                mic: ["🎤 Mic", "bg-green-500/80 text-white"],
+                text: ["⌨ Text", "bg-orange-500/80 text-white"],
+                blocked: ["🚫 Blocked", "bg-red-500/80 text-white"]
+            };
+            if(audioMap[audioState]) {
+                audioBadge.className = `px-3 py-1 rounded-full ${audioMap[audioState][1]} backdrop-blur shadow`;
+                audioBadge.innerText = audioMap[audioState][0];
+            }
+
+            // Vision
+            const visionMap = {
+                ok: ["👁 Vision OK", "bg-green-500/80 text-white"],
+                occluded: ["⚠ Occluded", "bg-yellow-500/80 text-slate-900"],
+                lost: ["❌ Lost", "bg-red-500/80 text-white"]
+            };
+            if(visionMap[visionState]) {
+                visionBadge.className = `px-3 py-1 rounded-full ${visionMap[visionState][1]} backdrop-blur shadow`;
+                visionBadge.innerText = visionMap[visionState][0];
+            }
+        }
+
+        // ===============================
+        // Camera Picker v2 (No Phone Cam) - by Xi
+        // ===============================
+        function normalizeLabel(label = "") {
+          return label.toLowerCase().replace(/\s+/g, " ").trim();
+        }
+
+        function scoreCameraLabel(labelRaw = "") {
+          const label = normalizeLabel(labelRaw);
+
+          const allow = [
+            "integrated", "built-in", "internal", "webcam", "facetime",
+            "hp truevision", "lenovo easycamera", "thinkpad camera",
+            "asus uvc", "dell", "logitech", "c920", "c922", "brio",
+            "uvc", "usb video device",
+            "ov02c",        // OmniVision 筆電晶片系列（如 Galaxy Book 的 OV02C10）
+            "camera sensor" // Galaxy Book 內建鏡頭的完整名稱
+          ];
+
+          const block = [
+            "droidcam", "iriun", "ivcam", "epoccam",
+            "obs", "virtual", "manycam", "snap camera",
+            "phone", "android", "ios",
+            "galaxy s", "s25", "s24", "s23",     // 只擋 "galaxy s系列"，不擋 "galaxy book"
+            "continuity camera",
+            "screen", "capture",
+            "s5k"                                 // 三星手機專用晶片，可以擋
+            // ⚠️ 移除了 "sensor", "ov02", "ov", "imx"
+            // 因為 Galaxy Book 內建鏡頭 OV02C10 就是用 OmniVision 晶片
+            // 這些關鍵字會誤傷筆電內建鏡頭
+          ];
+
+          if (block.some(k => label.includes(k))) return -999;
+
+          let score = 0;
+          for (const k of allow) if (label.includes(k)) score += 50;
+          if (label.includes("integrated") || label.includes("built-in") || label.includes("internal")) score += 30;
+          if (!label) score += 5;
+          if (label.length > 0 && label.length < 6) score -= 10;
+          if (label === "camera" || label === "usb camera") score -= 10;
+
+          return score;
+        }
+
+        async function getVideoInputs() {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          return devices.filter(d => d.kind === "videoinput");
+        }
+
+        async function pickBestCameraDeviceId(videoDevices) {
+          const ranked = videoDevices
+            .map(d => ({ device: d, score: scoreCameraLabel(d.label) }))
+            .sort((a, b) => b.score - a.score);
+
+          const best = ranked[0]?.device;
+          if (!best || ranked[0].score < 20) return null;
+          return best.deviceId;
+        }
+
+        async function stopStream(stream) {
+          try { stream?.getTracks()?.forEach(t => t.stop()); } catch (e) {}
+        }
+
+        // --- Logging Utility ---
+        function log(msg) {
+            logBox.innerHTML += `<br>> ${msg}`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // --- 取得所有攝影機列表 ---
+        // --- 取得攝影機列表 (Camera Picker v2 by 曦) ---
+        getCamerasBtn.addEventListener('click', async () => {
+            try {
+                log("正在請求相機與麥克風權限...");
+
+                // 先拿權限，stream 確認 active 之後才 enumerate
+                const tmpStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                
+                // 確保 stream 真的有 track 再繼續
+                if (!tmpStream || tmpStream.getVideoTracks().length === 0) {
+                    throw new Error("無法取得視訊 stream，請確認攝影機未被其他程式佔用。");
+                }
+
+                // enumerate 必須在 getUserMedia 成功後才能拿到 label
+                const allDevices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = allDevices.filter(d => d.kind === "videoinput");
+
+                // Debug：印出所有偵測到的設備（幫助排查問題）
+                log(`🔍 偵測到 ${videoDevices.length} 個視訊設備：`);
+                videoDevices.forEach((d, i) => log(`  [${i}] ${d.label || "(no label)"} | id: ${d.deviceId?.slice(0,12)}...`));
+
+                // 填充下拉選單（全部列出讓用戶可以手動換）
+                cameraSelect.innerHTML = '';
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Camera ${index + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+
+                // 用計分系統選出最佳鏡頭
+                const bestId = await pickBestCameraDeviceId(videoDevices);
+
+                if (bestId) {
+                    cameraSelect.value = bestId;
+                    const chosen = videoDevices.find(d => d.deviceId === bestId);
+                    log(`🎯 已鎖定最佳鏡頭：${chosen?.label || "Best Camera"}`);
+                } else {
+                    // ✅ 保底：計分系統找不到理想鏡頭時，
+                    // 直接選第一個可用的（比報錯強，用戶還可以手動換）
+                    const fallbackId = videoDevices[0]?.deviceId;
+                    if (fallbackId) {
+                        cameraSelect.value = fallbackId;
+                        log(`⚠️ 計分未找到理想鏡頭，已選第一個可用：${videoDevices[0]?.label || "Camera 1"}（請確認選單是否正確）`);
+                    } else {
+                        log("❌ 完全找不到任何攝影機設備。");
+                    }
+                }
+
+                await stopStream(tmpStream);
+
+                log("✅ 請確認選單中的鏡頭正確，再點「啟動毒舌刑警」！");
+                getCamerasBtn.classList.add('hidden');
+                cameraSelect.classList.remove('hidden');
+                startBtn.classList.remove('hidden');
+
+                audioState = "mic";
+                updateBadges();
+
+            } catch(e) {
+                log("無法取得權限，請確認瀏覽器設定：" + e.message);
+                audioState = "blocked";
+                updateBadges();
+            }
+        });
+
+        // ====================================================================
+        // ✅ 修改重點：generateRoast 改打自己的後端，不再直接打 Gemini
+        // ====================================================================
+        async function generateRoast(userReply = "") {
+            isRoasting = true;
+            turnState = userReply ? TURN.RESPONDING : TURN.ROASTING;
+            
+            banterState = "responding";
+            updateBadges();
+
+            lastRoastTime = Date.now();
+            widgetIcon.textContent = '🗣️';
+            
+            if (userReply) {
+                log(`妳頂嘴: "${userReply}"`);
+            } else {
+                log("偵測到烏龜頸！呼叫 Posture Police 後端開罵...");
+            }
+
+            try {
+                // 走 WebSocket 送給 Gemini
+                if (!isLiveReady || !liveWs || liveWs.readyState !== WebSocket.OPEN) {
+                    throw new Error("WebSocket 未連線");
+                }
+                const prompt = userReply
+                    ? `用戶頂嘴說：「${userReply}」，嘴回去！`
+                    : 'SLOUCH_DETECTED';
+                liveWs.send(JSON.stringify({
+                    type: 'posture_event',
+                    event: prompt
+                }));
+                log("已送出給 Gemini，等待回應...");
+                return;
+                
+            } catch (error) {
+                // 後端炸了 or 網路斷了 → 用本地 fallback 句庫，保證 Demo 不中斷
+                console.warn("後端 API 失敗，切換離線模式:", error.message);
+                const fallbackMsg = userReply 
+                    ? offlineSmartReply(userReply)
+                    : offlineRoasts[Math.floor(Math.random() * offlineRoasts.length)];
+                
+                log(`[離線模式] 毒舌: "${fallbackMsg}"`);
+                speak(fallbackMsg);
+            }
+        }
+
+        // --- Text to Speech ---
+        function speak(text) {
+            if (!window.speechSynthesis) {
+                log("妳的瀏覽器不支援語音合成。");
+                isRoasting = false;
+                turnState = TURN.IDLE;
+                banterState = "idle";
+                updateBadges();
+                return;
+            }
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-TW';
+            utterance.rate = 1.1; 
+            
+            utterance.onstart = () => {
+                turnState = TURN.ROASTING;
+            };
+
+            utterance.onend = () => {
+                isRoasting = false;
+                widgetIcon.textContent = '🛡️';
+
+                postureCooldownUntil = Date.now() + POST_RESPONSE_COOLDOWN_MS;
+
+                if (autoBanterEnabled) {
+                    openBanterWindow(AUTO_BANTER_LISTEN_MS);
+                } else {
+                    turnState = TURN.IDLE;
+                    banterState = "idle";
+                    updateBadges();
+                    banterBtn.classList.remove('hidden');
+                    setTimeout(() => { banterBtn.classList.add('hidden'); }, 8000);
+                }
+            };
+            
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function openBanterWindow(ms = 10000) {
+            banterSessionId += 1;
+            const sid = banterSessionId;
+
+            banterWindowOpen = true;
+            banterUtteranceTaken = false; 
+            turnState = TURN.LISTENING;
+
+            log(`🎤 回嘴回合開啟（${Math.round(ms/1000)} 秒）...`);
+
+            startBanterListening(ms, sid);
+
+            clearTimeout(banterTimer);
+            banterTimer = setTimeout(() => closeBanterWindow("timeout", sid), ms + 200);
+        }
+
+        function closeBanterWindow(reason = "done", sid = banterSessionId) {
+            if (banterClosedForSession.has(sid)) return;
+            banterClosedForSession.add(sid);
+
+            clearTimeout(banterTimer);
+            banterTimer = null;
+
+            banterWindowOpen = false;
+            if (turnState === TURN.LISTENING) {
+                turnState = TURN.IDLE;
+            }
+
+            banterState = "idle";
+            updateBadges();
+
+            if (activeRecognition) {
+                try { 
+                    activeRecognition.onresult = null; 
+                    activeRecognition.onerror = null; 
+                    activeRecognition.onend = null; 
+                } catch(e){}
+                try { activeRecognition.stop(); } catch(e){}
+                activeRecognition = null;
+            }
+
+            log(`🧩 回嘴回合結束（${reason}）`);
+            resetBanterBtn();
+        }
+
+        function startBanterListening(listenMs = 10000, sid = banterSessionId) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                fallbackToPrompt("瀏覽器不支援語音辨識 API！");
+                return;
+            }
+
+            if (activeRecognition) {
+                try { activeRecognition.stop(); } catch(e){}
+                activeRecognition = null;
+            }
+
+            const recognition = new SpeechRecognition();
+            activeRecognition = recognition;
+
+            recognition.lang = 'zh-TW';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+
+            let gotResult = false;
+
+            recognition.onstart = () => {
+                banterState = "listening";
+                updateBadges();
+
+                banterBtn.innerText = "自動聽妳頂嘴中...";
+                banterBtn.classList.remove('hidden');
+                banterBtn.classList.replace('bg-red-500', 'bg-red-700');
+            };
+
+            recognition.onresult = (event) => {
+                gotResult = true;
+                
+                if (banterUtteranceTaken) return;
+
+                const speech = event.results?.[0]?.[0]?.transcript?.trim() || "";
+                if (speech.length > 0) {
+                    banterUtteranceTaken = true; 
+                    
+                    closeBanterWindow("got_result", sid);
+                    resetBanterBtn();
+
+                    turnState = TURN.RESPONDING;
+                    generateRoast(speech);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                log(`語音辨識中斷 (錯誤代碼: ${event.error})`);
+
+                if (event.error === "aborted" && gotResult) return;
+
+                if (["not-allowed", "service-not-allowed"].includes(event.error)) {
+                    audioState = "blocked";
+                    updateBadges();
+
+                    closeBanterWindow("speech_blocked", sid);
+                    resetBanterBtn();
+                    fallbackToPrompt("麥克風被環境/權限擋住了（sandbox/policy）。");
+                } else if (event.error === "no-speech") {
+                    closeBanterWindow("speech_error:no-speech", sid);
+                    resetBanterBtn();
+                } else {
+                    closeBanterWindow(`speech_error:${event.error}`, sid);
+                    resetBanterBtn();
+                }
+            };
+
+            recognition.onend = () => {};
+
+            try {
+                recognition.start();
+            } catch(e) {
+                audioState = "blocked";
+                updateBadges();
+
+                closeBanterWindow("start_blocked", sid);
+                resetBanterBtn();
+                fallbackToPrompt("語音啟動被阻止（需要使用者先點一下解鎖）。");
+            }
+        }
+
+        // --- Fallback to Prompt ---
+        function fallbackToPrompt(reason) {
+            log(`${reason} 啟動打字回嘴備案！`);
+            resetBanterBtn();
+            
+            audioState = "text";
+            updateBadges();
+
+            const input = document.getElementById('custom-prompt-input');
+            document.getElementById('prompt-reason').innerText = `${reason} 請直接打字回嘴抱怨：`;
+            
+            customPromptModal.classList.remove('hidden');
+            customPromptModal.classList.add('flex');
+            
+            input.value = '';
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeModal() {
+            customPromptModal.classList.add('hidden');
+            customPromptModal.classList.remove('flex');
+        }
+
+        document.getElementById('prompt-submit-btn').addEventListener('click', () => {
+            if (banterUtteranceTaken) {
+                log("這回合妳已經回嘴過一次了，下一輪再來😈");
+                closeModal();
+                return;
+            }
+
+            banterUtteranceTaken = true;
+            const fallbackText = document.getElementById('custom-prompt-input').value;
+            closeModal();
+            
+            closeBanterWindow("typed_reply", banterSessionId);
+            resetBanterBtn();
+            turnState = TURN.RESPONDING;
+
+            if (fallbackText && fallbackText.trim().length > 0) {
+                generateRoast(fallbackText);
+            } else {
+                log("放棄回嘴？看來妳承認自己駝背了。");
+                turnState = TURN.IDLE;
+            }
+        });
+
+        document.getElementById('prompt-cancel-btn').addEventListener('click', () => {
+            closeModal();
+            closeBanterWindow("prompt_cancelled", banterSessionId);
+            log("主動取消互嗆？算妳識相，乖乖挺胸吧。");
+            turnState = TURN.IDLE;
+        });
+
+        document.getElementById('custom-prompt-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('prompt-submit-btn').click();
+            }
+        });
+
+        function resetBanterBtn() {
+            banterBtn.classList.add('hidden');
+            banterBtn.innerText = "🎤 點我回嘴！";
+            banterBtn.classList.replace('bg-red-700', 'bg-red-500');
+        }
+
+        startBtn.addEventListener('click', init);
+        
+        muteBtn.addEventListener('click', () => {
+            isMuted = !isMuted;
+            muteBtn.innerHTML = isMuted ? "🔇 語音已關閉" : "🔊 語音開啟中<br><small style='font-size:10px;opacity:0.7'>Voice: ON</small>";
+            muteBtn.classList.toggle('bg-purple-500', !isMuted);
+            muteBtn.classList.toggle('bg-slate-500', isMuted);
+            log(isMuted ? "進入靜音測試模式，現在只會抓角度，不會發出聲音。" : "語音已重新開啟！準備好被罵了嗎？");
+        });
+
+        autoBanterToggleBtn.addEventListener('click', () => {
+            autoBanterEnabled = !autoBanterEnabled;
+            autoBanterToggleBtn.innerHTML = autoBanterEnabled ? "🔄 自動回嘴: ON<br><small style='font-size:10px;opacity:0.7'>Auto-Banter: ON</small>" : "🔄 自動回嘴: OFF<br><small style='font-size:10px;opacity:0.7'>Auto-Banter: OFF</small>";
+            autoBanterToggleBtn.classList.toggle('bg-indigo-500', autoBanterEnabled);
+            autoBanterToggleBtn.classList.toggle('bg-slate-600', !autoBanterEnabled);
+            log(`自動回嘴模式已${autoBanterEnabled ? '開啟' : '關閉'}。`);
+        });
+
+        calibrateBtn.addEventListener('click', () => {
+            if (currentRatio > 0) {
+                baselineRatio = currentRatio;
+                log(`已鎖定標準坐姿比例: ${baselineRatio.toFixed(2)}。只要下降超過 15% 就會開罵！`);
+                calibrateBtn.innerText = "重新校正";
+                calibrateBtn.classList.replace('bg-blue-500', 'bg-slate-600');
+            } else {
+                log("偵測不到臉部與肩膀，請調整鏡頭角度。");
+            }
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            isPaused = !isPaused;
+            if (isPaused) {
+                pauseBtn.innerText = "▶️ 恢復監控";
+                pauseBtn.classList.replace('bg-yellow-500', 'bg-emerald-500');
+                log("監控已暫停。");
+            } else {
+                pauseBtn.innerHTML = "⏸️ 暫停監控<br><small style='font-size:10px;opacity:0.7'>Pause</small>";
+                pauseBtn.classList.replace('bg-emerald-500', 'bg-yellow-500');
+                log("監控已恢復！小心妳的脖子。");
+            }
+        });
+
+        banterBtn.addEventListener('click', () => {
+            if (turnState === TURN.IDLE) {
+                openBanterWindow(5000);
+            }
+        });
+        
+        minimizeBtn.addEventListener('click', () => {
+            mainDashboard.classList.add('hidden');
+            floatingWidget.classList.remove('hidden');
+            log("進入隱藏模式。我還在看著妳。");
+        });
+
+        window.restoreDashboard = () => {
+            floatingWidget.classList.add('hidden');
+            mainDashboard.classList.remove('hidden');
+        };
+
+        // Initialize badges on load
+        updateBadges();
+
+    </script>
+</body>
+</html>

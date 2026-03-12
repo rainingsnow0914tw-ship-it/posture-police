@@ -1,0 +1,14 @@
+node_modules/
+.cache/
+.codeoss/
+.config/
+.docker/
+.gemini/
+.bash_history
+.bash_logout
+.bashrc
+.profile
+.gitconfig
+.sudo_as_admin_successful
+README-cloudshell.txt
+*.log
