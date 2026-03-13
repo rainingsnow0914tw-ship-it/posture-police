@@ -1,3 +1,15 @@
+<div align="center">
+
+[![Gemini Live Agent Challenge](https://img.shields.io/badge/Gemini_Live_Agent_Challenge-2026-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://geminiliveagentchallenge.devpost.com)
+&nbsp;&nbsp;
+[![Google Cloud](https://img.shields.io/badge/Google_Cloud-Powered-DB4437?style=for-the-badge&logo=googlecloud&logoColor=white)](https://cloud.google.com)
+&nbsp;&nbsp;
+[![Demo Video](https://img.shields.io/badge/Demo_Video-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/NJIgIC2jUCM?si=0hmpTEQ2KJKipYfc)
+&nbsp;&nbsp;
+[![Live App](https://img.shields.io/badge/Live_App-Try_Now-34A853?style=for-the-badge&logo=firebase&logoColor=white)](https://project-f30de725-baf2-4498-b70.web.app)
+
+</div>
+
 # 🐢 Posture Police
 > The Live Agent that roasts you back to health.
 
