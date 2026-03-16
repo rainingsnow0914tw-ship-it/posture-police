@@ -86,22 +86,22 @@
                 🚀 2. 啟動毒舌刑警
             </button>
             <button id="calibrate-btn" class="px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-full font-bold transition-colors hidden">
-                📍 校正標準坐姿
+                📍 校正標準坐姿<br><small style="font-size:10px;opacity:0.7">Calibrate</small>
             </button>
             <button id="mute-btn" class="px-6 py-3 bg-purple-500 hover:bg-purple-600 rounded-full font-bold transition-colors hidden text-white">
-                🔊 語音開啟中
+                🔊 語音開啟中<br><small style="font-size:10px;opacity:0.7">Voice: ON</small>
             </button>
             <button id="auto-banter-toggle-btn" class="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 rounded-full font-bold transition-colors hidden text-white">
-                🔄 自動回嘴: ON
+                🔄 自動回嘴: ON<br><small style="font-size:10px;opacity:0.7">Auto-Banter: ON</small>
             </button>
             <button id="pause-btn" class="px-6 py-3 bg-yellow-500 hover:bg-yellow-600 rounded-full font-bold transition-colors hidden text-slate-900">
-                ⏸️ 暫停監控
+                ⏸️ 暫停監控<br><small style="font-size:10px;opacity:0.7">Pause</small>
             </button>
             <button id="banter-btn" class="px-6 py-3 bg-red-500 hover:bg-red-600 rounded-full font-bold transition-colors hidden">
                 🎤 點我回嘴！
             </button>
             <button id="minimize-btn" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-full font-bold transition-colors hidden">
-                進入隱形模式
+                進入隱形模式<br><small style="font-size:10px;opacity:0.7">Stealth Mode</small>
             </button>
         </div>
 
@@ -351,7 +351,9 @@
             for (const b64 of chunks) {
                 const binary = atob(b64);
                 for (let i = 0; i < binary.length; i += 2) {
-                    pcmData[offset++] = (binary.charCodeAt(i + 1) << 8) | binary.charCodeAt(i);
+                    const lo = binary.charCodeAt(i) & 0xFF;
+                    const hi = (i + 1 < binary.length) ? (binary.charCodeAt(i + 1) & 0xFF) : 0;
+                    pcmData[offset++] = (hi << 8) | lo;
                 }
             }
 
@@ -1375,7 +1377,7 @@ let isPaused = false;
         
         muteBtn.addEventListener('click', () => {
             isMuted = !isMuted;
-            muteBtn.innerText = isMuted ? "🔇 語音已關閉" : "🔊 語音開啟中";
+            muteBtn.innerHTML = isMuted ? "🔇 語音已關閉" : "🔊 語音開啟中<br><small style='font-size:10px;opacity:0.7'>Voice: ON</small>";
             muteBtn.classList.toggle('bg-purple-500', !isMuted);
             muteBtn.classList.toggle('bg-slate-500', isMuted);
             log(isMuted ? "進入靜音測試模式，現在只會抓角度，不會發出聲音。" : "語音已重新開啟！準備好被罵了嗎？");
@@ -1383,7 +1385,7 @@ let isPaused = false;
 
         autoBanterToggleBtn.addEventListener('click', () => {
             autoBanterEnabled = !autoBanterEnabled;
-            autoBanterToggleBtn.innerText = autoBanterEnabled ? "🔄 自動回嘴: ON" : "🔄 自動回嘴: OFF";
+            autoBanterToggleBtn.innerHTML = autoBanterEnabled ? "🔄 自動回嘴: ON<br><small style='font-size:10px;opacity:0.7'>Auto-Banter: ON</small>" : "🔄 自動回嘴: OFF<br><small style='font-size:10px;opacity:0.7'>Auto-Banter: OFF</small>";
             autoBanterToggleBtn.classList.toggle('bg-indigo-500', autoBanterEnabled);
             autoBanterToggleBtn.classList.toggle('bg-slate-600', !autoBanterEnabled);
             log(`自動回嘴模式已${autoBanterEnabled ? '開啟' : '關閉'}。`);
@@ -1407,7 +1409,7 @@ let isPaused = false;
                 pauseBtn.classList.replace('bg-yellow-500', 'bg-emerald-500');
                 log("監控已暫停。");
             } else {
-                pauseBtn.innerText = "⏸️ 暫停監控";
+                pauseBtn.innerHTML = "⏸️ 暫停監控<br><small style='font-size:10px;opacity:0.7'>Pause</small>";
                 pauseBtn.classList.replace('bg-emerald-500', 'bg-yellow-500');
                 log("監控已恢復！小心妳的脖子。");
             }
